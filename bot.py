@@ -629,14 +629,8 @@ async def _disconnect_unreachable(active_uid: int, blocked_uid: int):
 # MAIN ENTRY POINT
 # ==========================================
 async def main():
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-    print("Starting Talkify Bot with Moderation System...")
-    await bot.delete_webhook(drop_pending_updates=True)
+    print("BOT STARTED 🔥")
     await dp.start_polling(bot)
 
-
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("Bot stopped by user.")
+    asyncio.run(main())
