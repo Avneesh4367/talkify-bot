@@ -3,7 +3,10 @@ import logging
 import sys
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import (
+    Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+)
 
 # Handle aiogram 3.x version differences
 try:
@@ -26,6 +29,8 @@ user_preference = {}      # user_id -> str
 waiting_queue = []        # list of user_id
 active_chats = {}         # user_id -> partner_id
 user_warnings = {}        # user_id -> int
+user_info = {}            # user_id -> {'username': str, 'first_name': str}
+pending_requests = {}     # requester_id -> partner_id
 
 # ==========================================
 # BOT & DISPATCHER SETUP
@@ -65,6 +70,16 @@ def get_chat_kb() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="🚨 Report"), KeyboardButton(text="🤝 Connect")]
         ],
         resize_keyboard=True
+    )
+
+def get_connect_inline_kb(requester_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Approve", callback_data=f"accept_{requester_id}"),
+                InlineKeyboardButton(text="❌ Reject", callback_data=f"reject_{requester_id}")
+            ]
+        ]
     )
 
 # ==========================================
@@ -107,7 +122,7 @@ async def start(message: Message):
         active_chats.pop(partner_id, None)
         try:
             await bot.send_message(partner_id, "⚠️ Your partner left.", reply_markup=ReplyKeyboardRemove())
-            user_state[partner_id] = None
+            user_state.pop(partner_id, None)
         except Exception:
             pass
             
@@ -115,6 +130,10 @@ async def start(message: Message):
         waiting_queue.remove(user_id)
 
     user_state[user_id] = "gender"
+    user_info[user_id] = {
+        'username': message.from_user.username,
+        'first_name': message.from_user.first_name
+    }
     await message.answer("👋 Welcome to Talkify!\n\nWhat is your gender?", reply_markup=get_gender_kb())
 
 
@@ -187,7 +206,7 @@ async def chat_handler(message: Message):
             active_chats.pop(user_id, None)
             active_chats.pop(partner, None)
             
-            user_state[user_id] = None
+            user_state.pop(user_id, None)
             user_state[partner] = "waiting"
             waiting_queue.append(partner)
             
@@ -208,7 +227,7 @@ async def chat_handler(message: Message):
             active_chats.pop(partner, None)
             
             user_state[user_id] = "waiting"
-            user_state[partner] = None
+            user_state.pop(partner, None)
             waiting_queue.append(user_id)
             
             await message.answer("⚠️ User reported.", reply_markup=ReplyKeyboardRemove())
@@ -221,10 +240,18 @@ async def chat_handler(message: Message):
             return
 
         elif text == "🤝 Connect":
-            # Send message to request a deeper connection
+            # Check if a request is already pending
+            if pending_requests.get(user_id) == partner:
+                return await message.answer("⚠️ You already sent a request.")
+            
+            pending_requests[user_id] = partner
             await message.answer("Request sent to partner.")
             try:
-                await bot.send_message(partner, "🤝 Partner wants to connect!")
+                await bot.send_message(
+                    partner,
+                    "🤝 Your partner wants to connect privately. Do you want to share your Telegram IDs?",
+                    reply_markup=get_connect_inline_kb(user_id)
+                )
             except Exception:
                 pass
             return
@@ -236,12 +263,61 @@ async def chat_handler(message: Message):
             # Drop chat on failed delivery (e.g. user blocked bot)
             active_chats.pop(user_id, None)
             active_chats.pop(partner, None)
-            user_state[user_id] = None
-            user_state[partner] = None
+            user_state.pop(user_id, None)
+            user_state.pop(partner, None)
             await message.answer("Message failed. The partner might have left.", reply_markup=ReplyKeyboardRemove())
 
 
-# 6. fallback handler (silent)
+# 6. Callback handlers for Connection Requests
+@dp.callback_query(F.data.startswith("accept_"))
+async def handle_accept(call: CallbackQuery):
+    requester_id = int(call.data.split("_")[1])
+    approver_id = call.from_user.id
+    
+    # Safety Check: still in chat?
+    if active_chats.get(approver_id) != requester_id:
+        await call.answer("❌ This request is no longer valid.", show_alert=True)
+        await call.message.delete()
+        return
+        
+    # Share IDs/Usernames
+    req_info = user_info.get(requester_id, {})
+    app_info = user_info.get(approver_id, {})
+    
+    req_mention = f"@{req_info['username']}" if req_info.get('username') else f"ID: {requester_id}"
+    app_mention = f"@{app_info['username']}" if app_info.get('username') else f"ID: {approver_id}"
+    
+    try:
+        await bot.send_message(
+            requester_id,
+            f"✅ Connection approved!\n\nYou can now message each other privately:\n\nUser: {app_mention}"
+        )
+        await bot.send_message(
+            approver_id,
+            f"✅ Connection approved!\n\nYou can now message each other privately:\n\nUser: {req_mention}"
+        )
+    except Exception:
+        pass
+        
+    pending_requests.pop(requester_id, None)
+    await call.message.edit_text("✅ ID shared!")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("reject_"))
+async def handle_reject(call: CallbackQuery):
+    requester_id = int(call.data.split("_")[1])
+    
+    try:
+        await bot.send_message(requester_id, "❌ Your connection request was rejected.")
+    except Exception:
+        pass
+        
+    pending_requests.pop(requester_id, None)
+    await call.message.edit_text("❌ Request rejected.")
+    await call.answer()
+
+
+# 7. fallback handler (silent)
 @dp.message()
 async def fallback(message: Message):
     return
@@ -252,7 +328,7 @@ async def fallback(message: Message):
 # ==========================================
 async def main():
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-    print("BOT STARTED 🔥")
+    print("BOT STARTED")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
