@@ -451,34 +451,9 @@ async def cmd_invite(message: Message):
 
 # ==========================================
 # REGISTRATION SYSTEM
-# ==========================================
-@router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
-    uid = message.from_user.id
-
-    if is_banned(uid):
-        return await message.answer("🚫 You are banned from using this bot.", reply_markup=ReplyKeyboardRemove())
-
-    users.add(uid)
-    identity = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
-    
-    if uid not in user_preferences: user_preferences[uid] = {}
-    user_preferences[uid]['username'] = identity
-
-    if uid in active_chats: await handle_stop(uid)
-    elif uid in waiting_queue: waiting_queue.remove(uid)
-
-    last_active[uid] = time.time()
-    notified_users.discard(uid)
-    await message.answer(
-        "👋 Welcome to Talkify!\n\n"
-        "Let's set up your profile quickly.\n"
-        "Invite friends to get better matches!",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    await asyncio.sleep(0.5)
-    await message.answer("What is your gender?", reply_markup=get_gender_kb())
-    await state.set_state(RegState.waiting_for_gender)
+@dp.message(F.text == "/start")
+async def start(message: Message):
+    await message.answer("Bot working 😈🔥")
 
 @router.message(RegState.waiting_for_gender)
 async def process_gender(message: Message, state: FSMContext):
@@ -563,66 +538,9 @@ async def on_connect_response(call: CallbackQuery):
     except: pass
 
 
-@router.message()
-async def on_message_received(message: Message, state: FSMContext):
-    uid = message.from_user.id
-    last_active[uid] = time.time()
-
-    # Core execution block
-    if is_banned(uid):
-        return await message.answer("🚫 You are banned from using this bot.", reply_markup=ReplyKeyboardRemove())
-
-    curr_state = await state.get_state()
-    if curr_state: return
-        
-    text = message.text
-
-    if text == "⚙️ Menu":
-        return await message.answer("⚙️ Options Menu", reply_markup=get_options_menu())
-    elif text == "Back ⬅️":
-        return await message.answer("Retracted menu.", reply_markup=get_menu_btn())
-    elif text == "Next 🔄":
-        return await handle_next(uid)
-    elif text == "Stop ⛔":
-        return await handle_stop(uid)
-    elif text == "Connect 🤝":
-        return await handle_connect(uid)
-    elif text == "Report 🚨":
-        return await handle_report(uid)
-    elif text == "🧹 Clear Chat" or text == "/clearchat":
-        return await handle_clearchat(message, state)
-
-    if uid in active_chats:
-        partner_id = active_chats[uid]
-        try:
-            await bot.copy_message(
-                chat_id=partner_id,
-                from_chat_id=message.chat.id,
-                message_id=message.message_id
-            )
-        except Exception as e:
-            err_msg = str(e).lower()
-            logging.warning(f"Failed to forward message from {uid} to {partner_id}: {e}")
-            if "forbidden" in err_msg or "blocked" in err_msg or "not found" in err_msg or "deactivated" in err_msg:
-                await _disconnect_unreachable(uid, partner_id)
-    elif uid not in waiting_queue:
-        if uid not in notified_users:
-            try:
-                await message.answer("Use /start to find a partner.", reply_markup=ReplyKeyboardRemove())
-                notified_users.add(uid)
-            except:
-                pass
-
-async def _disconnect_unreachable(active_uid: int, blocked_uid: int):
-    active_chats.pop(active_uid, None)
-    active_chats.pop(blocked_uid, None)
-    try:
-        await bot.send_message(active_uid, "⚠️ Your partner left. Finding a new person for you...", reply_markup=ReplyKeyboardRemove())
-        if active_uid not in waiting_queue and not is_banned(active_uid):
-            waiting_queue.append(active_uid)
-            asyncio.create_task(reconnect_flow(active_uid))
-        asyncio.create_task(try_match())
-    except: pass
+@dp.message()
+async def fallback(message: Message):
+    await message.answer("Message received ✅")
 
 
 # ==========================================
@@ -630,16 +548,6 @@ async def _disconnect_unreachable(active_uid: int, blocked_uid: int):
 # ==========================================
 async def main():
     print("BOT STARTED 🔥")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
-    import asyncio
-
-async def main():
-    print("BOT STARTED 🔥")
-
-    # IMPORTANT: bot object properly pass kar
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
