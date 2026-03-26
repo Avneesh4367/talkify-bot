@@ -634,3 +634,13 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    import asyncio
+
+async def main():
+    print("BOT STARTED 🔥")
+
+    # IMPORTANT: bot object properly pass kar
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
