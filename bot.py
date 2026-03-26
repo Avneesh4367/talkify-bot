@@ -25,6 +25,7 @@ user_gender = {}          # user_id -> str
 user_preference = {}      # user_id -> str
 waiting_queue = []        # list of user_id
 active_chats = {}         # user_id -> partner_id
+user_warnings = {}        # user_id -> int
 
 # ==========================================
 # BOT & DISPATCHER SETUP
@@ -57,6 +58,15 @@ def get_preference_kb() -> ReplyKeyboardMarkup:
         resize_keyboard=True, one_time_keyboard=True
     )
 
+def get_chat_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🔄 Next"), KeyboardButton(text="⛔ Stop")],
+            [KeyboardButton(text="🚨 Report"), KeyboardButton(text="🤝 Connect")]
+        ],
+        resize_keyboard=True
+    )
+
 # ==========================================
 # MATCHMAKING LOGIC
 # ==========================================
@@ -73,12 +83,12 @@ async def try_match():
         user_state[user2] = "chatting"
         
         try:
-            await bot.send_message(user1, "🎉 You are now connected!", reply_markup=ReplyKeyboardRemove())
+            await bot.send_message(user1, "🎉 You are now connected!", reply_markup=get_chat_kb())
         except Exception:
             pass
             
         try:
-            await bot.send_message(user2, "🎉 You are now connected!", reply_markup=ReplyKeyboardRemove())
+            await bot.send_message(user2, "🎉 You are now connected!", reply_markup=get_chat_kb())
         except Exception:
             pass
 
@@ -150,7 +160,76 @@ async def chat_handler(message: Message):
 
     if user_id in active_chats:
         partner = active_chats[user_id]
-        
+        text = message.text
+
+        if text == "🔄 Next":
+            # End current chat
+            active_chats.pop(user_id, None)
+            active_chats.pop(partner, None)
+            
+            # Add them back to waiting_queue
+            user_state[user_id] = "waiting"
+            user_state[partner] = "waiting"
+            waiting_queue.append(user_id)
+            waiting_queue.append(partner)
+            
+            await message.answer("🔍 Finding new partner...", reply_markup=ReplyKeyboardRemove())
+            try:
+                await bot.send_message(partner, "⚠️ Partner requested Next. Finding new partner...", reply_markup=ReplyKeyboardRemove())
+            except Exception:
+                pass
+            
+            await try_match()
+            return
+
+        elif text == "⛔ Stop":
+            # End chat and do NOT reconnect
+            active_chats.pop(user_id, None)
+            active_chats.pop(partner, None)
+            
+            user_state[user_id] = None
+            user_state[partner] = "waiting"
+            waiting_queue.append(partner)
+            
+            await message.answer("⛔ Chat stopped.", reply_markup=ReplyKeyboardRemove())
+            try:
+                await bot.send_message(partner, "⚠️ Partner stopped chat. Finding new partner...", reply_markup=ReplyKeyboardRemove())
+            except Exception:
+                pass
+                
+            await try_match()
+            return
+
+        elif text == "🚨 Report":
+            # Add warning to partner and end chat
+            user_warnings[partner] = user_warnings.get(partner, 0) + 1
+            
+            active_chats.pop(user_id, None)
+            active_chats.pop(partner, None)
+            
+            user_state[user_id] = "waiting"
+            user_state[partner] = None
+            waiting_queue.append(user_id)
+            
+            await message.answer("⚠️ User reported.", reply_markup=ReplyKeyboardRemove())
+            try:
+                await bot.send_message(partner, "⚠️ You have been reported and the chat has ended.", reply_markup=ReplyKeyboardRemove())
+            except Exception:
+                pass
+                
+            await try_match()
+            return
+
+        elif text == "🤝 Connect":
+            # Send message to request a deeper connection
+            await message.answer("Request sent to partner.")
+            try:
+                await bot.send_message(partner, "🤝 Partner wants to connect!")
+            except Exception:
+                pass
+            return
+            
+        # Normal chat forwarding
         try:
             await bot.send_message(partner, message.text)
         except Exception:
@@ -159,7 +238,7 @@ async def chat_handler(message: Message):
             active_chats.pop(partner, None)
             user_state[user_id] = None
             user_state[partner] = None
-            await message.answer("Message failed. The partner might have left.")
+            await message.answer("Message failed. The partner might have left.", reply_markup=ReplyKeyboardRemove())
 
 
 # 6. fallback handler (silent)
