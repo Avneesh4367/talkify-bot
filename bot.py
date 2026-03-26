@@ -453,7 +453,7 @@ async def cmd_invite(message: Message):
 # REGISTRATION SYSTEM
 @dp.message(F.text == "/start")
 async def start(message: Message):
-    await message.answer("Bot working 😈🔥")
+    await message.answer("👋 Welcome to Talkify!\nFinding a partner for you...")
 
 @router.message(RegState.waiting_for_gender)
 async def process_gender(message: Message, state: FSMContext):
@@ -539,8 +539,12 @@ async def on_connect_response(call: CallbackQuery):
 
 
 @dp.message()
-async def fallback(message: Message):
-    await message.answer("Message received ✅")
+async def chat_handler(message: Message):
+    user_id = message.from_user.id
+
+    if user_id in active_chats:
+        partner = active_chats[user_id]
+        await bot.send_message(partner, message.text)
 
 
 # ==========================================
