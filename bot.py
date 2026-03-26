@@ -85,27 +85,80 @@ def get_connect_inline_kb(requester_id: int) -> InlineKeyboardMarkup:
 # ==========================================
 # MATCHMAKING LOGIC
 # ==========================================
+def is_match(user1, user2):
+    pref1 = user_preference.get(user1)
+    pref2 = user_preference.get(user2)
+    gender1 = user_gender.get(user1)
+    gender2 = user_gender.get(user2)
+
+    # Everyone matches anyone
+    if pref1 == "Everyone" or pref2 == "Everyone":
+        return True
+
+    # Boys ↔ Girls
+    if pref1 == "Girls" and gender2 == "Girl":
+        return True
+    if pref2 == "Girls" and gender1 == "Girl":
+        return True
+
+    if pref1 == "Boys" and gender2 == "Boy":
+        return True
+    if pref2 == "Boys" and gender1 == "Boy":
+        return True
+
+    # Gay (Boy ↔ Boy)
+    if pref1 == "Gay" and gender2 == "Boy":
+        return True
+    if pref2 == "Gay" and gender1 == "Boy":
+        return True
+
+    # Lesbian (Girl ↔ Girl)
+    if pref1 == "Lesbian" and gender2 == "Girl":
+        return True
+    if pref2 == "Lesbian" and gender1 == "Girl":
+        return True
+
+    return False
+
 async def try_match():
-    # Simple matching system that connects the first two users in the queue
-    if len(waiting_queue) >= 2:
-        user1 = waiting_queue.pop(0)
-        user2 = waiting_queue.pop(0)
+    # Loop through the queue to find the first compatible pair
+    i = 0
+    while i < len(waiting_queue):
+        user1 = waiting_queue[i]
         
-        active_chats[user1] = user2
-        active_chats[user2] = user1
-        
-        user_state[user1] = "chatting"
-        user_state[user2] = "chatting"
-        
-        try:
-            await bot.send_message(user1, "🎉 You are now connected!", reply_markup=get_chat_kb())
-        except Exception:
-            pass
+        # Look for a match for user1
+        j = i + 1
+        while j < len(waiting_queue):
+            user2 = waiting_queue[j]
             
-        try:
-            await bot.send_message(user2, "🎉 You are now connected!", reply_markup=get_chat_kb())
-        except Exception:
-            pass
+            if is_match(user1, user2):
+                # Found a match!
+                waiting_queue.pop(j)
+                waiting_queue.pop(i)
+                
+                print(f"{user1} matched with {user2}")
+                
+                active_chats[user1] = user2
+                active_chats[user2] = user1
+                
+                user_state[user1] = "chatting"
+                user_state[user2] = "chatting"
+                
+                try:
+                    await bot.send_message(user1, "🎉 You are now connected!", reply_markup=get_chat_kb())
+                except Exception:
+                    pass
+                    
+                try:
+                    await bot.send_message(user2, "🎉 You are now connected!", reply_markup=get_chat_kb())
+                except Exception:
+                    pass
+                
+                # Restart matching search from the beginning to pair others
+                i = -1 
+                break
+            j += 1
+        i += 1
 
 # ==========================================
 # CORE HANDLERS (Sequential Flow)
